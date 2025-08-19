@@ -1,0 +1,380 @@
+{
+  "name": "LinkedIn Posting Agent (v2)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "events": "message"
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        200,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ telegram_api_key }}",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.message.chat.id}}",
+        "text": "Got it! I'm now working on a draft for you. I'll send it over for your review shortly.",
+        "notice": "={{false}}"
+      },
+      "name": "Confirm Receipt",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 4.1,
+      "position": [
+        420,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ telegram_api_key }}",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gemini-pro",
+        "resource": "text",
+        "operation": "message",
+        "text": "Based on the following news dump, please draft a professional LinkedIn post. The post should be engaging, well-structured, and include relevant hashtags. News Dump: {{$json.message.text}}"
+      },
+      "name": "Draft Post with Gemini",
+      "type": "n8n-nodes-langchain.googlegemini",
+      "typeVersion": 1,
+      "position": [
+        640,
+        320
+      ],
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "{{ gemini_api_key }}",
+          "name": "Gemini account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gemini-pro-vision",
+        "resource": "image",
+        "operation": "generate",
+        "prompt": "Generate a visually appealing and professional image that represents the key theme of the following LinkedIn post: {{$node[\\\"Draft Post with Gemini\\\"].json.text}}"
+      },
+      "name": "Generate Image with Gemini",
+      "type": "n8n-nodes-langchain.googlegemini",
+      "typeVersion": 1,
+      "position": [
+        860,
+        320
+      ],
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "{{ gemini_api_key }}",
+          "name": "Gemini account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "postText",
+              "value": "={{$node[\\\"Draft Post with Gemini\\\"].json.text}}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": true,
+          "binaryPropertyName": "postImage"
+        }
+      },
+      "name": "Set Content for Approval",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1080,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.message.chat.id}}",
+        "resource": "message",
+        "operation": "sendAndWaitForResponse",
+        "message": "Here is the draft. What do you think?",
+        "responseType": "approval",
+        "approvalOptions": {
+          "typeOfApproval": "approveDecline",
+          "approvalButtonLabel": "✅ Approve",
+          "declineButtonLabel": "❌ Reject"
+        },
+        "additionalFields": {
+          "photo": "={{$binary.postImage.data}}",
+          "caption": "={{$json.postText}}"
+        }
+      },
+      "name": "Ask for Approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 4.1,
+      "position": [
+        1300,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ telegram_api_key }}",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.response}}",
+              "value2": "approve"
+            },
+            {
+              "value1": "={{$json.response}}",
+              "value2": "decline"
+            }
+          ]
+        }
+      },
+      "name": "IF Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "post",
+        "operation": "create",
+        "postAs": "person",
+        "person": "={{$credentials.linkedInOAuth2Api.personId}}",
+        "text": "={{$node[\\\"Set Content for Approval\\\"].json.postText}}",
+        "additionalFields": {
+          "media": "={{$node[\\\"Set Content for Approval\\\"].binary.postImage.data}}"
+        }
+      },
+      "name": "Publish to LinkedIn",
+      "type": "n8n-nodes-base.linkedin",
+      "typeVersion": 2.2,
+      "position": [
+        1740,
+        220
+      ],
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "{{ linkedin_api_key }}",
+          "name": "LinkedIn account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.message.chat.id}}",
+        "text": "Your post has been published!\\n{{$node[\\\"Publish to LinkedIn\\\"].json.url}}",
+        "notice": "={{false}}"
+      },
+      "name": "Send Final Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 4.1,
+      "position": [
+        1960,
+        220
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ telegram_api_key }}",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.message.chat.id}}",
+        "resource": "message",
+        "operation": "sendAndWaitForResponse",
+        "message": "I've rejected the draft. Please provide your feedback for the new version.",
+        "responseType": "freeText",
+        "freeTextOptions": {}
+      },
+      "name": "Ask for Feedback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 4.1,
+      "position": [
+        1740,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "{{ telegram_api_key }}",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gemini-pro",
+        "resource": "text",
+        "operation": "message",
+        "text": "The user rejected the previous draft. Please create a new version based on their feedback. Feedback: {{$node[\\\"Ask for Feedback\\\"].json.response}}\\n\\nOriginal News Dump: {{$node[\\\"Telegram Trigger\\\"].json.message.text}}"
+      },
+      "name": "Re-draft Post with Gemini",
+      "type": "n8n-nodes-langchain.googlegemini",
+      "typeVersion": 1,
+      "position": [
+        1960,
+        420
+      ],
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "{{ gemini_api_key }}",
+          "name": "Gemini account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Confirm Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Receipt": {
+      "main": [
+        [
+          {
+            "node": "Draft Post with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Post with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Generate Image with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Set Content for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Content for Approval": {
+      "main": [
+        [
+          {
+            "node": "Ask for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask for Approval": {
+      "main": [
+        [
+          {
+            "node": "IF Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Approved?": {
+      "main": [
+        [
+          {
+            "node": "Publish to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask for Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Send Final Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask for Feedback": {
+      "main": [
+        [
+          {
+            "node": "Re-draft Post with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-draft Post with Gemini": {
+      "main": [
+        [
+          {
+            "node": "Generate Image with Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
